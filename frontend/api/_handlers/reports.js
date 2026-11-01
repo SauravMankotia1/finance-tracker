@@ -6,10 +6,8 @@ const PALETTE = [
   '#06B6D4', '#EC4899', '#6366F1', '#14B8A6', '#F97316'
 ];
 
-export default async function handler(req, res) {
-  if (req.method !== 'GET') {
-    return sendResponse(res, 405, false, 'Method not allowed');
-  }
+export async function reportsAnalyticsHandler(req, res) {
+  if (req.method !== 'GET') return sendResponse(res, 405, false, 'Method not allowed');
 
   let user;
   try {
@@ -20,9 +18,9 @@ export default async function handler(req, res) {
 
   try {
     const today = new Date();
-    const periodMode = (req.query.period || 'monthly').toLowerCase().trim();
-    const targetYear = parseInt(req.query.year, 10) || today.getFullYear();
-    const targetMonth = parseInt(req.query.month, 10) || today.getMonth() + 1;
+    const periodMode = (req.query?.period || 'monthly').toLowerCase().trim();
+    const targetYear = parseInt(req.query?.year, 10) || today.getFullYear();
+    const targetMonth = parseInt(req.query?.month, 10) || today.getMonth() + 1;
 
     const pad = (n) => String(n).padStart(2, '0');
     const formatDate = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
@@ -38,20 +36,17 @@ export default async function handler(req, res) {
       startDateStr = `${targetYear}-01-01`;
       endDateStr = `${targetYear}-12-31`;
     } else {
-      // Monthly
       startDateStr = `${targetYear}-${pad(targetMonth)}-01`;
       const endDay = new Date(targetYear, targetMonth, 0).getDate();
       endDateStr = `${targetYear}-${pad(targetMonth)}-${pad(endDay)}`;
     }
 
     if (isUsingPostgres()) {
-      // Totals
       const totalsRes = await query(
         `SELECT
            COALESCE(SUM(CASE WHEN type = 'INCOME' THEN amount ELSE 0 END), 0) as "totalIncome",
            COALESCE(SUM(CASE WHEN type = 'EXPENSE' THEN amount ELSE 0 END), 0) as "totalExpenses"
-         FROM transactions
-         WHERE user_id = $1 AND date >= $2 AND date <= $3`,
+         FROM transactions WHERE user_id = $1 AND date >= $2 AND date <= $3`,
         [user.id, startDateStr, endDateStr]
       );
 
@@ -60,18 +55,15 @@ export default async function handler(req, res) {
       const netSavings = totalIncome - totalExpenses;
       const savingsRate = totalIncome > 0 ? parseFloat(((netSavings / totalIncome) * 100).toFixed(1)) : 0;
 
-      // Category breakdown
       const catRes = await query(
         `SELECT category, SUM(amount) as amount
-         FROM transactions
-         WHERE user_id = $1 AND type = 'EXPENSE' AND date >= $2 AND date <= $3
+         FROM transactions WHERE user_id = $1 AND type = 'EXPENSE' AND date >= $2 AND date <= $3
          GROUP BY category ORDER BY SUM(amount) DESC`,
         [user.id, startDateStr, endDateStr]
       );
 
       let topSpendingCategory = 'N/A';
       let topCategoryAmount = 0;
-
       if (catRes.rows.length > 0) {
         topSpendingCategory = catRes.rows[0].category;
         topCategoryAmount = parseFloat(catRes.rows[0].amount);
@@ -87,7 +79,6 @@ export default async function handler(req, res) {
         };
       });
 
-      // Trend data
       const trendData = [];
       const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
       const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -141,7 +132,6 @@ export default async function handler(req, res) {
           });
         }
       } else {
-        // Monthly mode: past 6 months
         for (let i = 5; i >= 0; i--) {
           const d = new Date(targetYear, targetMonth - 1 - i, 1);
           const y = d.getFullYear();
@@ -183,7 +173,6 @@ export default async function handler(req, res) {
         trendData,
       });
     } else {
-      // Memory Store Analytics
       const store = getMemoryStore();
       const userTxs = store.transactions.filter(
         (t) => t.user_id === user.id && t.date >= startDateStr && t.date <= endDateStr
@@ -210,7 +199,6 @@ export default async function handler(req, res) {
         color: PALETTE[idx % PALETTE.length],
       }));
 
-      // Trend data
       const trendData = [];
       const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
       const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -268,7 +256,50 @@ export default async function handler(req, res) {
       });
     }
   } catch (err) {
-    console.error('Analytics error:', err);
     return sendResponse(res, 500, false, 'Failed to fetch analytics: ' + err.message);
+  }
+}
+
+export async function reportsCsvHandler(req, res) {
+  if (req.method !== 'GET') return res.status(405).json({ success: false, message: 'Method not allowed' });
+
+  let user;
+  try {
+    user = await authenticate(req);
+  } catch (err) {
+    return res.status(err.status || 401).json({ success: false, message: err.message });
+  }
+
+  try {
+    let txs = [];
+    if (isUsingPostgres()) {
+      const dataRes = await query(
+        `SELECT id, type, amount, category, TO_CHAR(date, 'YYYY-MM-DD') as date, description, notes, payment_method
+         FROM transactions WHERE user_id = $1 ORDER BY date DESC, id DESC`,
+        [user.id]
+      );
+      txs = dataRes.rows;
+    } else {
+      const store = getMemoryStore();
+      txs = store.transactions.filter((t) => t.user_id === user.id).sort((a, b) => (a.date < b.date ? 1 : -1));
+    }
+
+    const escapeCsv = (str) => {
+      if (str === null || str === undefined) return '""';
+      const clean = String(str).replace(/"/g, '""');
+      return `"${clean}"`;
+    };
+
+    let csv = 'Transaction ID,Date,Type,Category,Amount,Currency,Description,Payment Method,Notes\n';
+    for (const t of txs) {
+      csv += `${t.id},${t.date},${t.type},${escapeCsv(t.category)},${parseFloat(t.amount).toFixed(2)},${user.currency || 'USD'},${escapeCsv(t.description)},${escapeCsv(t.payment_method || t.paymentMethod || 'Card')},${escapeCsv(t.notes || '')}\n`;
+    }
+
+    const filename = `finflow_transactions_${new Date().toISOString().split('T')[0]}.csv`;
+    res.setHeader('Content-Type', 'text/csv; charset=UTF-8');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    return res.status(200).send(csv);
+  } catch (err) {
+    return res.status(500).json({ success: false, message: 'Failed to export CSV: ' + err.message });
   }
 }

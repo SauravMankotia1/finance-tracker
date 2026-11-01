@@ -50,59 +50,13 @@ function vercelApiDevPlugin() {
         };
 
         try {
-          let targetFile = null;
-
-          if (pathname === 'health') {
-            targetFile = 'health.js';
-          } else if (pathname === 'auth/register') {
-            targetFile = 'auth/register.js';
-          } else if (pathname === 'auth/login') {
-            targetFile = 'auth/login.js';
-          } else if (pathname === 'auth/me') {
-            targetFile = 'auth/me.js';
-          } else if (pathname === 'auth/update-profile') {
-            targetFile = 'auth/update-profile.js';
-          } else if (pathname === 'auth/change-password') {
-            targetFile = 'auth/change-password.js';
-          } else if (pathname === 'auth/seed-demo-data') {
-            targetFile = 'auth/seed-demo-data.js';
-          } else if (pathname === 'auth/clear-data') {
-            targetFile = 'auth/clear-data.js';
-          } else if (pathname === 'transactions') {
-            targetFile = 'transactions/index.js';
-          } else if (pathname === 'transactions/all') {
-            targetFile = 'transactions/all.js';
-          } else if (pathname.startsWith('transactions/')) {
-            req.query.id = pathname.split('/')[1];
-            targetFile = 'transactions/[id].js';
-          } else if (pathname === 'budgets') {
-            targetFile = 'budgets/index.js';
-          } else if (pathname.startsWith('budgets/')) {
-            req.query.id = pathname.split('/')[1];
-            targetFile = 'budgets/[id].js';
-          } else if (pathname === 'dashboard/stats') {
-            targetFile = 'dashboard/stats.js';
-          } else if (pathname === 'reports/analytics') {
-            targetFile = 'reports/analytics.js';
-          } else if (pathname === 'reports/export/csv') {
-            targetFile = 'reports/export/csv.js';
-          } else if (pathname === 'categories') {
-            targetFile = 'categories/index.js';
-          } else if (pathname.startsWith('categories/')) {
-            req.query.id = pathname.split('/')[1];
-            targetFile = 'categories/[id].js';
+          const absolutePath = path.resolve(process.cwd(), 'api', 'index.js');
+          const fileUrl = url.pathToFileURL(absolutePath).href + '?t=' + Date.now();
+          const handlerModule = await import(fileUrl);
+          if (handlerModule && handlerModule.default) {
+            return await handlerModule.default(req, res);
           }
-
-          if (targetFile) {
-            const absolutePath = path.resolve(process.cwd(), 'api', targetFile);
-            const fileUrl = url.pathToFileURL(absolutePath).href + '?t=' + Date.now();
-            const handlerModule = await import(fileUrl);
-            if (handlerModule && handlerModule.default) {
-              return await handlerModule.default(req, res);
-            }
-          }
-
-          return res.status(404).json({ success: false, message: `Route /api/${pathname} not found` });
+          return res.status(404).json({ success: false, message: `Route ${req.url} not found` });
         } catch (err) {
           console.error('[API Dev Server Error]:', err);
           return res.status(500).json({ success: false, message: err.message });

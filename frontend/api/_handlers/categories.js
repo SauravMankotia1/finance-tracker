@@ -19,7 +19,7 @@ const DEFAULT_CATEGORIES = [
   { name: 'Other Income', type: 'INCOME', icon: 'DollarSign', color: '#F59E0B' },
 ];
 
-export default async function handler(req, res) {
+export async function categoriesHandler(req, res, pathParamId = null) {
   let user;
   try {
     user = await authenticate(req);
@@ -27,7 +27,29 @@ export default async function handler(req, res) {
     return sendResponse(res, err.status || 401, false, err.message);
   }
 
-  const { type } = req.query;
+  const catId = pathParamId ? parseInt(pathParamId, 10) : (req.query?.id ? parseInt(req.query.id, 10) : null);
+
+  if (catId && !isNaN(catId)) {
+    if (req.method === 'DELETE') {
+      try {
+        if (isUsingPostgres()) {
+          const delRes = await query('DELETE FROM categories WHERE id = $1 AND user_id = $2 AND is_custom = TRUE', [catId, user.id]);
+          if (delRes.rowCount === 0) return sendResponse(res, 400, false, 'Cannot delete system default category or category of another user');
+        } else {
+          const store = getMemoryStore();
+          const idx = store.categories.findIndex((c) => c.id === catId && c.user_id === user.id && c.is_custom === true);
+          if (idx === -1) return sendResponse(res, 400, false, 'Cannot delete system default category or category of another user');
+          store.categories.splice(idx, 1);
+        }
+        return sendResponse(res, 200, true, 'Category deleted successfully');
+      } catch (err) {
+        return sendResponse(res, 500, false, err.message);
+      }
+    }
+    return sendResponse(res, 405, false, 'Method not allowed');
+  }
+
+  const { type } = req.query || {};
 
   if (req.method === 'GET') {
     try {
@@ -74,9 +96,7 @@ export default async function handler(req, res) {
   if (req.method === 'POST') {
     try {
       const { name, type: cType, icon = 'Tag', color = '#10B981' } = req.body || {};
-      if (!name || !cType) {
-        return sendResponse(res, 400, false, 'Category name and type are required');
-      }
+      if (!name || !cType) return sendResponse(res, 400, false, 'Category name and type are required');
 
       if (isUsingPostgres()) {
         const insertRes = await query(

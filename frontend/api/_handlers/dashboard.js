@@ -6,10 +6,8 @@ const PALETTE = [
   '#06B6D4', '#EC4899', '#6366F1', '#14B8A6', '#F97316'
 ];
 
-export default async function handler(req, res) {
-  if (req.method !== 'GET') {
-    return sendResponse(res, 405, false, 'Method not allowed');
-  }
+export async function dashboardStatsHandler(req, res) {
+  if (req.method !== 'GET') return sendResponse(res, 405, false, 'Method not allowed');
 
   let user;
   try {
@@ -36,7 +34,6 @@ export default async function handler(req, res) {
     const prevMonthEnd = `${prevYear}-${pad(prevMonth)}-${pad(prevMonthEndDay)}`;
 
     if (isUsingPostgres()) {
-      // 1. All-time Totals
       const allTotalsRes = await query(
         `SELECT
            COALESCE(SUM(CASE WHEN type = 'INCOME' THEN amount ELSE 0 END), 0) as "totalIncome",
@@ -50,7 +47,6 @@ export default async function handler(req, res) {
       const totalSavings = totalBalance;
       const savingsRate = totalIncome > 0 ? parseFloat(((totalSavings / totalIncome) * 100).toFixed(1)) : 0;
 
-      // 2. Current Month Totals
       const curTotalsRes = await query(
         `SELECT
            COALESCE(SUM(CASE WHEN type = 'INCOME' THEN amount ELSE 0 END), 0) as "monthlyIncome",
@@ -63,7 +59,6 @@ export default async function handler(req, res) {
       const monthlySavings = monthlyIncome - monthlyExpenses;
       const monthlySavingsRate = monthlyIncome > 0 ? parseFloat(((monthlySavings / monthlyIncome) * 100).toFixed(1)) : 0;
 
-      // 3. Previous Month Totals
       const prevTotalsRes = await query(
         `SELECT
            COALESCE(SUM(CASE WHEN type = 'INCOME' THEN amount ELSE 0 END), 0) as "prevIncome",
@@ -75,15 +70,10 @@ export default async function handler(req, res) {
       const previousMonthExpenses = parseFloat(prevTotalsRes.rows[0].prevExpenses) || 0;
 
       let incomeGrowth = 0;
-      if (previousMonthIncome > 0) {
-        incomeGrowth = parseFloat((((monthlyIncome - previousMonthIncome) / previousMonthIncome) * 100).toFixed(1));
-      }
+      if (previousMonthIncome > 0) incomeGrowth = parseFloat((((monthlyIncome - previousMonthIncome) / previousMonthIncome) * 100).toFixed(1));
       let expenseGrowth = 0;
-      if (previousMonthExpenses > 0) {
-        expenseGrowth = parseFloat((((monthlyExpenses - previousMonthExpenses) / previousMonthExpenses) * 100).toFixed(1));
-      }
+      if (previousMonthExpenses > 0) expenseGrowth = parseFloat((((monthlyExpenses - previousMonthExpenses) / previousMonthExpenses) * 100).toFixed(1));
 
-      // 4. Budgets Summary
       const budgetRes = await query(
         `SELECT COALESCE(SUM(monthly_limit), 0) as "totalBudget" FROM budgets WHERE user_id = $1 AND budget_month = $2 AND budget_year = $3`,
         [user.id, curMonth, curYear]
@@ -101,7 +91,6 @@ export default async function handler(req, res) {
       const totalBudgetSpent = parseFloat(budgetSpentRes.rows[0].totalBudgetSpent) || 0;
       const totalBudgetRemaining = totalBudget - totalBudgetSpent;
 
-      // 5. Recent 10 Transactions
       const recentRes = await query(
         `SELECT id, type, amount, category, TO_CHAR(date, 'YYYY-MM-DD') as date, description, notes, payment_method as "paymentMethod", created_at as "createdAt"
          FROM transactions WHERE user_id = $1 ORDER BY date DESC, id DESC LIMIT 10`,
@@ -109,7 +98,6 @@ export default async function handler(req, res) {
       );
       const recentTransactions = recentRes.rows.map((r) => ({ ...r, amount: parseFloat(r.amount) }));
 
-      // 6. Category Distribution
       let catRes = await query(
         `SELECT category, SUM(amount) as amount
          FROM transactions
@@ -139,7 +127,6 @@ export default async function handler(req, res) {
         };
       });
 
-      // 7. Monthly Trends (Past 6 months)
       const monthlySpendingTrends = [];
       const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
@@ -193,7 +180,6 @@ export default async function handler(req, res) {
         monthlySpendingTrends,
       });
     } else {
-      // Memory Store Aggregation
       const store = getMemoryStore();
       const userTxs = store.transactions.filter((t) => t.user_id === user.id);
 
@@ -214,13 +200,9 @@ export default async function handler(req, res) {
       const previousMonthExpenses = prevMonthTxs.filter((t) => t.type === 'EXPENSE').reduce((s, t) => s + parseFloat(t.amount), 0);
 
       let incomeGrowth = 0;
-      if (previousMonthIncome > 0) {
-        incomeGrowth = parseFloat((((monthlyIncome - previousMonthIncome) / previousMonthIncome) * 100).toFixed(1));
-      }
+      if (previousMonthIncome > 0) incomeGrowth = parseFloat((((monthlyIncome - previousMonthIncome) / previousMonthIncome) * 100).toFixed(1));
       let expenseGrowth = 0;
-      if (previousMonthExpenses > 0) {
-        expenseGrowth = parseFloat((((monthlyExpenses - previousMonthExpenses) / previousMonthExpenses) * 100).toFixed(1));
-      }
+      if (previousMonthExpenses > 0) expenseGrowth = parseFloat((((monthlyExpenses - previousMonthExpenses) / previousMonthExpenses) * 100).toFixed(1));
 
       const userBudgets = store.budgets.filter((b) => b.user_id === user.id && b.budget_month === curMonth && b.budget_year === curYear);
       const totalBudget = userBudgets.reduce((s, b) => s + parseFloat(b.monthly_limit), 0);
@@ -245,7 +227,6 @@ export default async function handler(req, res) {
           createdAt: t.created_at,
         }));
 
-      // Category breakdown
       const expGroup = {};
       const expSource = curMonthTxs.filter((t) => t.type === 'EXPENSE').length > 0
         ? curMonthTxs.filter((t) => t.type === 'EXPENSE')
@@ -264,7 +245,6 @@ export default async function handler(req, res) {
         color: PALETTE[idx % PALETTE.length],
       }));
 
-      // Trends
       const monthlySpendingTrends = [];
       const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
       for (let i = 5; i >= 0; i--) {
@@ -311,7 +291,6 @@ export default async function handler(req, res) {
       });
     }
   } catch (err) {
-    console.error('Dashboard stats error:', err);
     return sendResponse(res, 500, false, 'Failed to get dashboard stats: ' + err.message);
   }
 }
