@@ -1,5 +1,5 @@
 server:
-  port: 8080
+  port: ${PORT:8080}
   servlet:
     context-path: /
 
@@ -8,12 +8,12 @@ spring:
     name: finance-tracker
   
   datasource:
-    # Uses PostgreSQL if SPRING_DATASOURCE_URL / DATABASE_URL is set (Render/Supabase),
-    # otherwise defaults to local in-memory H2 database with PostgreSQL compatibility mode!
+    # Uses PostgreSQL if SPRING_DATASOURCE_URL / DATABASE_URL is set (Neon / Render),
+    # otherwise defaults to local in-memory H2 database with PostgreSQL compatibility mode.
     url: ${SPRING_DATASOURCE_URL:${DATABASE_URL:jdbc:h2:mem:financedb;DB_CLOSE_DELAY=-1;MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE}}
     username: ${SPRING_DATASOURCE_USERNAME:${DATABASE_USERNAME:sa}}
     password: ${SPRING_DATASOURCE_PASSWORD:${DATABASE_PASSWORD:}}
-    driver-class-name: ${SPRING_DATASOURCE_DRIVER_CLASS_NAME:org.h2.Driver}
+    driver-class-name: ${SPRING_DATASOURCE_DRIVER_CLASS_NAME:org.postgresql.Driver}
 
   jpa:
     hibernate:
@@ -23,7 +23,7 @@ spring:
 
   h2:
     console:
-      enabled: true
+      enabled: ${H2_CONSOLE_ENABLED:false}
       path: /h2-console
       settings:
         web-allow-others: false
