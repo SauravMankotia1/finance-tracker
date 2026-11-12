@@ -24,3 +24,6 @@ mingit.zip
 frontend/.vercel/
 .vercel/
 
+
+.vercel
+.env*
